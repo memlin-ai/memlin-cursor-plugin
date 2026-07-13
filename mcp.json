@@ -5,7 +5,7 @@
       "args": ["${CURSOR_PLUGIN_ROOT}/dist/mcp-server.js"],
       "env": {
         "MEMLIN_HOST": "cursor",
-        "MEMLIN_AGENT_VERSION": "0.3.2"
+        "MEMLIN_AGENT_VERSION": "0.3.3"
       }
     }
   }
