@@ -1,0 +1,51 @@
+---
+description: How to use Memlin project context (skills, memory, approved goals, schemas, decisions) and the memlin_* MCP tools.
+alwaysApply: true
+---
+
+# Memlin
+
+This workspace is connected to a Memlin workspace. The native plugin bundles
+the `memlin` MCP server — its tools (`memlin_resolve_task`,
+`memlin_search`, `memlin_read_memory`, `memlin_get_document`, …) expose the
+team's shared memory, skills, approved goals, schemas, and decisions.
+
+## Resolve context for each task
+
+At session start, check for assigned handoffs with `memlin_list_handoffs`
+(filter to target_agent_kind `cursor` when supported). If a handoff is present,
+read its `packet_markdown`, call `memlin_update_handoff` with action `accept`,
+and use that packet as the task brief. Mark it `complete` when finished.
+
+Before non-trivial work, call **`memlin_resolve_task`** with a short
+description of the task. It returns a scope-correct, citation-bearing bundle:
+the top skills, memory facts, approved goals, schemas, and decisions for this project.
+
+The Memlin `beforeSubmitPrompt` hook also injects a `<memlin-resolved-context>`
+block when your Cursor build supports per-prompt context injection. When you
+see such a block, treat it as already-resolved — don't re-call
+`memlin_resolve_task` for that same message.
+
+If you see `<memlin-auth-notice>`, Memlin is not signed in or could not refresh
+its token — direct the user to `/memlin-login`. Do not claim a Command Palette
+sign-in action exists, and do not silently proceed as if context were available.
+
+## How to use the bundle
+
+1. **Treat it as authoritative project context** — it is scope-filtered and
+   RLS-enforced server-side; you don't need to ask the user for access.
+2. **Apply the primary skill's framework** first; use supporting skills for
+   complementary perspectives. **Treat memory facts as project ground truth**
+   (more authoritative than training data when they conflict). **Honor approved
+   goals and required/pinned decisions as constraints.** Use other decisions as
+   cited context. **Validate against any schemas.**
+3. **Cite your sources** — name the path + version, e.g. "Per
+   `goals/auth-required.md` v1, every new endpoint requires authn."
+
+## Explore beyond the current task
+
+- "What does Memlin know about X?" (broader than the task) → `memlin_search`.
+- "List all approved goals in this project" → `memlin_read_memory` + filter.
+- Full body of a doc the bundle only cited → `memlin_get_document`.
+
+If nothing relevant comes back, proceed with general expertise and say so.

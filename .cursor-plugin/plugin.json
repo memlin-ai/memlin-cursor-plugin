@@ -1,0 +1,17 @@
+{
+  "name": "memlin",
+  "version": "0.3.2",
+  "description": "Shared project context, memory, decisions, approved goals, and guardrails for Cursor.",
+  "author": {
+    "name": "Memlin",
+    "email": "support@memlin.ai"
+  },
+  "homepage": "https://memlin.ai",
+  "repository": "https://github.com/memlin-ai/memlin-cursor-plugin",
+  "license": "UNLICENSED",
+  "keywords": ["memory", "context", "mcp", "hooks", "projects"],
+  "commands": "./commands/",
+  "rules": "./rules/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp.json"
+}
