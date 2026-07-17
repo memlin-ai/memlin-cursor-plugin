@@ -182,7 +182,7 @@ var init_companion_client = __esm({
 
 // apps/cursor-plugin/src/hooks/session-start.ts
 import { spawn } from "node:child_process";
-import path8 from "node:path";
+import path9 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // apps/cursor-plugin/src/auth-notice.ts
@@ -226,31 +226,97 @@ function formatAuthNotice(status) {
 import { promises as fs4 } from "node:fs";
 import path6 from "node:path";
 import os6 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/dist/auth.js
 import { promises as fs2 } from "node:fs";
 import path3 from "node:path";
 import os3 from "node:os";
+import { randomUUID } from "node:crypto";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
-function tokenFilePath() {
+function persistedTokenFilePath() {
   return process.env.MEMLIN_TOKEN_FILE || path3.join(os3.homedir(), ".config", "memlin", "token.json");
+}
+var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
+var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
+var AUTH_FILE_LOCK_RETRY_MS = 50;
+function authFileLockPath() {
+  return `${persistedTokenFilePath()}.auth.lock`;
+}
+async function acquireAuthFileLock() {
+  const file = authFileLockPath();
+  const owner = `${process.pid}:${randomUUID()}`;
+  await fs2.mkdir(path3.dirname(file), { recursive: true });
+  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const handle = await fs2.open(file, "wx", 384);
+      try {
+        await handle.writeFile(owner, "utf8");
+        await handle.sync();
+      } catch (error) {
+        await handle.close().catch(() => {
+        });
+        await fs2.rm(file, { force: true }).catch(() => {
+        });
+        throw error;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {
+        });
+        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
+        });
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        const stat = await fs2.stat(file);
+        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
+          await fs2.rm(file, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("another Memlin sign-in or token refresh is still being saved");
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
+    }
+  }
+}
+async function withAuthFileLock(operation) {
+  const release = await acquireAuthFileLock();
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs2.readFile(tokenFilePath(), "utf8");
+    const raw = await fs2.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 async function writePersistedToken(t) {
-  const file = tokenFilePath();
+  const file = persistedTokenFilePath();
   await fs2.mkdir(path3.dirname(file), { recursive: true });
-  const tmp = path3.join(path3.dirname(file), `token.json.tmp-${process.pid}`);
+  const tmp = path3.join(
+    path3.dirname(file),
+    `${path3.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  );
   await fs2.writeFile(tmp, JSON.stringify(t, null, 2), { mode: 384 });
   await fs2.chmod(tmp, 384).catch(() => {
   });
@@ -300,17 +366,27 @@ async function doRefresh(stale, marginMs) {
     }
   } catch {
   }
-  const refreshToken = latest?.refresh_token ?? stale.refresh_token;
+  const refreshSource = latest ?? stale;
+  const refreshToken = refreshSource.refresh_token;
   if (!refreshToken) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
     const fresh = await refreshAccessToken(refreshToken);
-    await writePersistedToken(fresh);
-    return fresh.access_token;
+    return await withAuthFileLock(async () => {
+      const beforeWrite = await readPersistedToken();
+      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
+        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
+          return beforeWrite.access_token;
+        }
+        throw new Error("saved Memlin credentials changed while the token was refreshing");
+      }
+      await writePersistedToken(fresh);
+      return fresh.access_token;
+    });
   } catch (err) {
     const after = await readPersistedToken();
-    if (after && after.access_token !== stale.access_token && Date.now() < after.expires_at - 6e4) {
+    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
       return after.access_token;
     }
     throw new Error(
@@ -332,6 +408,11 @@ function requireClientId() {
     );
   }
 }
+function decodeJwtPayload(jwt) {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("not a JWT");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+}
 
 // packages/plugin-core/dist/memlin-api-client.js
 import { readFileSync } from "node:fs";
@@ -344,6 +425,8 @@ var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
 var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
 var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
 var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
 var AGENT_EXPECTED_CAPABILITIES = {
   "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
   cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
@@ -493,7 +576,9 @@ var MemlinApiClient = class {
       [AGENT_KIND_HEADER]: resolveHost().kind,
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: agentVersion(),
-      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(",")
+      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(","),
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os5.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os5.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h["Memlin-Account-Id"] = this.cfg.accountId;
@@ -601,7 +686,7 @@ var MemlinApiClient = class {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}) {
+  async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.kinds) for (const k of opts.kinds) qs.append("kind", k);
     if (opts.scopes) for (const s of opts.scopes) qs.append("scope", s);
@@ -610,15 +695,17 @@ var MemlinApiClient = class {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`);
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d) => {
       const { status, ...rest } = d;
       return status == null ? rest : { ...rest, status };
     });
   }
   /** POST /documents — create or update a document. */
-  async writeDocument(input) {
-    return this.request("POST", "/documents", input);
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
   }
   /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
   async syncWorkspaceContract(input) {
@@ -957,7 +1044,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/dist/workspace-binding.js
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, promises as fs3 } from "node:fs";
 import path5 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
@@ -1156,29 +1243,53 @@ function isFileNotFound(error) {
 }
 
 // packages/plugin-core/dist/client.js
+function globalConfigFilePath() {
+  return process.env.MEMLIN_CONFIG_FILE || path6.join(os6.homedir(), ".config", "memlin", "config.json");
+}
 var CONFIG_DIR = path6.join(os6.homedir(), ".config", "memlin");
-var CONFIG_FILE = path6.join(CONFIG_DIR, "config.json");
 var TOKEN_FILE2 = path6.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs4.readFile(CONFIG_FILE, "utf8");
+    const raw = await fs4.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed.account_id || !parsed.user_id) return null;
+    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
+      return null;
+    }
     return {
-      api_url: parsed.api_url ?? DEFAULT_API_URL,
+      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
       account_id: parsed.account_id,
       user_id: parsed.user_id,
-      project_id: parsed.project_id ?? null
+      auth0_sub: parsed.auth0_sub,
+      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
     };
   } catch {
     return null;
   }
 }
+function accessTokenSubject(accessToken) {
+  try {
+    const subject = decodeJwtPayload(accessToken).sub;
+    return typeof subject === "string" && subject.length > 0 ? subject : null;
+  } catch {
+    return null;
+  }
+}
+function configMatchesAccessToken(config, accessToken) {
+  const subject = accessTokenSubject(accessToken);
+  return subject !== null && subject === config.auth0_sub;
+}
+async function getIdentityBoundAccessToken(config) {
+  const accessToken = await getValidAccessToken();
+  if (!configMatchesAccessToken(config, accessToken)) {
+    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
+  }
+  return accessToken;
+}
 async function getApi(opts = {}) {
   const config = await readConfig();
   if (!config) return null;
   try {
-    await getValidAccessToken();
+    await getIdentityBoundAccessToken(config);
   } catch {
     return null;
   }
@@ -1188,7 +1299,7 @@ async function getApi(opts = {}) {
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config.api_url || resolveApiUrl();
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
-    getAccessToken: getValidAccessToken,
+    getAccessToken: () => getIdentityBoundAccessToken(config),
     accountId: config.account_id
   });
   return { api, config, workspaceBound, workspaceRoot };
@@ -1200,6 +1311,12 @@ function applyWorkspaceOverlay(config, overlay) {
     config.project_id = overlay.binding.project_id;
   }
   return { workspaceBound: true, workspaceRoot: overlay.workspaceRoot };
+}
+function log(msg) {
+  if (process.env.MEMLIN_DEBUG) {
+    process.stderr.write(`[memlin] ${msg}
+`);
+  }
 }
 
 // packages/plugin-core/dist/project-resolver.js
@@ -1355,6 +1472,41 @@ function renderHandoffContext(handoff) {
   ].join("\n");
 }
 
+// packages/plugin-core/dist/heartbeat.js
+import crypto from "node:crypto";
+import { promises as fs5 } from "node:fs";
+import os7 from "node:os";
+import path8 from "node:path";
+var DEFAULT_THROTTLE_MS = 6e4;
+function statePath(cwd, host) {
+  const key = crypto.createHash("sha256").update(cwd).digest("hex").slice(0, 16);
+  return path8.join(os7.tmpdir(), `memlin-${host}-heartbeat-${key}.json`);
+}
+async function recentlySent(file, throttleMs) {
+  try {
+    const raw = await fs5.readFile(file, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.sent_at === "number" && Date.now() - parsed.sent_at < throttleMs;
+  } catch {
+    return false;
+  }
+}
+async function recordInstallHeartbeat(cwd, reason, opts = {}) {
+  const host = opts.host ?? resolveHost().kind;
+  const throttleMs = opts.throttleMs ?? DEFAULT_THROTTLE_MS;
+  const file = statePath(cwd, host);
+  if (await recentlySent(file, throttleMs)) return;
+  try {
+    const ctx = await getApi({ cwd });
+    if (!ctx) return;
+    await ctx.api.getAccount();
+    await fs5.writeFile(file, JSON.stringify({ sent_at: Date.now(), reason, host }), "utf8");
+    log(`${host} activity recorded: ${reason}`);
+  } catch (err) {
+    log(`${host} activity failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // apps/cursor-plugin/src/hook-io.ts
 function readHookInput() {
   return new Promise((resolve) => {
@@ -1383,8 +1535,8 @@ function readHookInput() {
 }
 
 // apps/cursor-plugin/src/hooks/session-start.ts
-var HOOK_DIR = path8.dirname(fileURLToPath2(import.meta.url));
-var PULL_PLANS_BIN = path8.resolve(HOOK_DIR, "../cli/pull-plans.js");
+var HOOK_DIR = path9.dirname(fileURLToPath2(import.meta.url));
+var PULL_PLANS_BIN = path9.resolve(HOOK_DIR, "../cli/pull-plans.js");
 function firePlanSync(cwd) {
   try {
     const child = spawn(process.execPath, [PULL_PLANS_BIN], {
@@ -1401,6 +1553,7 @@ async function main() {
   const input = await readHookInput();
   const cwd = input?.workspace_roots?.[0] ?? process.cwd();
   firePlanSync(cwd);
+  void recordInstallHeartbeat(cwd, "session-start", { throttleMs: 0, host: "cursor" });
   const auth = await readAuthStatus();
   const authNotice = formatAuthNotice(auth);
   let handoffContext = null;

@@ -6886,12 +6886,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f2;
     };
-    function addFormats(ajv, list, fs8, exportName) {
+    function addFormats(ajv, list, fs7, exportName) {
       var _a2;
       var _b;
       (_a2 = (_b = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f2 of list)
-        ajv.addFormat(f2, fs8[f2]);
+        ajv.addFormat(f2, fs7[f2]);
     }
     module2.exports = exports2 = formatsPlugin;
     Object.defineProperty(exports2, "__esModule", { value: true });
@@ -29671,7 +29671,7 @@ var require_parse = __commonJS({
 var require_gray_matter = __commonJS({
   "node_modules/.pnpm/gray-matter@4.0.3/node_modules/gray-matter/index.js"(exports2, module2) {
     "use strict";
-    var fs8 = __require("fs");
+    var fs7 = __require("fs");
     var sections = require_section_matter();
     var defaults2 = require_defaults2();
     var stringify2 = require_stringify();
@@ -29755,7 +29755,7 @@ var require_gray_matter = __commonJS({
       return stringify2(file, data, options2);
     };
     matter3.read = function(filepath, options2) {
-      const str4 = fs8.readFileSync(filepath, "utf8");
+      const str4 = fs7.readFileSync(filepath, "utf8");
       const file = matter3(str4, options2);
       file.path = filepath;
       return file;
@@ -31412,7 +31412,6 @@ var init_companion_client = __esm({
 });
 
 // apps/mcp-server/src/index.ts
-import { promises as fs7 } from "node:fs";
 import { execSync as execSync4 } from "node:child_process";
 import path11 from "node:path";
 import os8 from "node:os";
@@ -57873,7 +57872,14 @@ var DOCUMENT_STATUS_TRANSITIONS = {
   approved: ["draft", "archived"],
   archived: ["draft"]
 };
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
+var MEMORY_TYPES = [
+  "correction",
+  "preference",
+  "fact",
+  "reference",
+  "episodic",
+  "working"
+];
 var DEFAULT_MEMORY_TYPE = "fact";
 var LEGACY_MEMORY_TYPE_MAP = {
   feedback: "correction",
@@ -59020,6 +59026,8 @@ function isEligibleForRecall(row, opts = {}) {
   if (ms && ms !== "active" && !(opts.includeBackground === true && ms === "background")) {
     return false;
   }
+  const supersededBy = typeof row.metadataSupersededBy === "string" ? row.metadataSupersededBy.trim() : "";
+  if (!ms && supersededBy && supersededBy !== row.id) return false;
   if ((row.kind === "goal" || row.kind === "skill") && row.status !== "approved") return false;
   return true;
 }
@@ -59048,6 +59056,34 @@ function byAuthorityThenScore(tierOf, scoreOf) {
     if (t2 !== 0) return t2;
     return scoreOf(b2) - scoreOf(a2);
   };
+}
+
+// packages/shared/dist/decision-authority.js
+var DECISION_AUTHORITY = {
+  REQUIRED_GOVERNANCE: AUTHORITY_TIER.REQUIRED_GOVERNANCE,
+  APPROVED_POLICY: AUTHORITY_TIER.APPROVED_POLICY,
+  HISTORICAL: AUTHORITY_TIER.HISTORICAL
+};
+function decisionAuthorityTier(input) {
+  if (input.metadata?.required_for_projects === true) {
+    return DECISION_AUTHORITY.REQUIRED_GOVERNANCE;
+  }
+  if (input.sqlStatus === "approved") return DECISION_AUTHORITY.APPROVED_POLICY;
+  return DECISION_AUTHORITY.HISTORICAL;
+}
+function classifyDecisionPair(a2, b2) {
+  if (a2.authorityTier !== b2.authorityTier) {
+    const [current2, outdated2] = a2.authorityTier < b2.authorityTier ? [a2, b2] : [b2, a2];
+    return { currentId: current2.id, outdatedId: outdated2.id, basis: "authority" };
+  }
+  const ta = Date.parse(a2.created_at);
+  const tb = Date.parse(b2.created_at);
+  if (ta !== tb && Number.isFinite(ta) && Number.isFinite(tb)) {
+    const [current2, outdated2] = ta > tb ? [a2, b2] : [b2, a2];
+    return { currentId: current2.id, outdatedId: outdated2.id, basis: "recency" };
+  }
+  const [current, outdated] = a2.id < b2.id ? [a2, b2] : [b2, a2];
+  return { currentId: current.id, outdatedId: outdated.id, basis: "recency" };
 }
 
 // packages/shared/dist/skill-frontmatter.js
@@ -59138,6 +59174,20 @@ var dmp = new import_diff_match_patch.default();
 // packages/mcp-tools/src/tools.ts
 var TOOL_SEARCHABLE_KINDS = ["skill", "memory", "goal", "schema", "decision"];
 var TOOL_GENERIC_WRITABLE_KINDS = ["memory", "skill", "goal", "schema"];
+var TOOL_HANDOFF_AGENT_KINDS = [
+  "claude-code",
+  "claude-ai",
+  "codex",
+  "cursor",
+  "windsurf",
+  "vscode",
+  "gemini",
+  "grok",
+  "hermes",
+  "openclaw",
+  "antigravity",
+  "mcp"
+];
 var TOOLS = [
   {
     name: "memlin_read_memory",
@@ -59300,7 +59350,7 @@ var TOOLS = [
         },
         include_open_threads: {
           type: "boolean",
-          description: 'Additionally pull OPEN episodic threads (predictions / follow-ups) whose entities match \u2014 by entity + status, bypassing similarity. For serial-content tasks (episodes, newsletters, recaps): "last week we flagged NVDA" gets grounded in the actual prior claim.'
+          description: "Deprecated no-op. Open episodic threads are always pulled by entity + status. Kept for older clients."
         },
         entities: {
           type: "array",
@@ -59526,7 +59576,7 @@ var TOOLS = [
         },
         target_agent_kind: {
           type: "string",
-          enum: ["claude-code", "claude-ai", "codex", "cursor", "windsurf", "mcp"],
+          enum: [...TOOL_HANDOFF_AGENT_KINDS],
           description: "Optional target agent kind filter. Agents should pass their own kind when known."
         },
         status: {
@@ -60907,12 +60957,28 @@ async function rerankHosted(task, candidates, config2) {
     if (apiKey) {
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
+  } else if (provider === "tei") {
+    if (!url) {
+      throw new Error("TEI provider selected but no endpointUrl configured.");
+    }
+    url = `${url.replace(/\/+$/, "")}/rerank`;
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
   } else {
     throw new Error(`Unsupported rerank provider: ${provider}`);
   }
   const documentTexts = candidates.map(formatCandidateText);
   let body;
-  if (provider === "custom") {
+  if (provider === "tei") {
+    body = JSON.stringify({
+      query: task,
+      texts: documentTexts,
+      raw_scores: false,
+      truncate: true,
+      truncation_direction: "Right"
+    });
+  } else if (provider === "custom") {
     body = JSON.stringify({
       query: task,
       texts: documentTexts,
@@ -61071,7 +61137,9 @@ var CLIENT_WRITABLE_METADATA_KEYS = /* @__PURE__ */ new Set([
   "component-links",
   "examples",
   "anti-examples",
-  "custom"
+  "custom",
+  // Tier-0 session working memory — session_id scopes force-include.
+  "session_id"
 ]);
 function filterClientMetadata(raw, kind2) {
   if (!raw) return {};
@@ -61290,6 +61358,8 @@ async function searchRanked(ctx, args, limit2) {
     (r2) => isEligibleForRecall({
       status: r2.status ?? null,
       metadataStatus: (r2.metadata ?? {}).status ?? null,
+      metadataSupersededBy: (r2.metadata ?? {}).superseded_by ?? null,
+      id: r2.id ?? null,
       kind: r2.kind
     })
   ).slice(0, limit2);
@@ -61641,6 +61711,8 @@ function isDirectResolverDocumentEligible(row, context, options2 = {}) {
   return isEligibleForRecall({
     status: typeof row.status === "string" ? row.status : null,
     metadataStatus: typeof metadata.status === "string" ? metadata.status : null,
+    metadataSupersededBy: typeof metadata.superseded_by === "string" ? metadata.superseded_by : null,
+    id: typeof row.id === "string" ? row.id : null,
     kind: row.kind
   });
 }
@@ -62449,6 +62521,60 @@ async function assemblePinned(ctx, projectId, agentKind2 = null, onTargetMismatc
   });
   return out;
 }
+var SESSION_WORKING_MAX_TOKENS = 600;
+async function assembleSessionWorking(ctx, sessionId, projectId) {
+  let query = ctx.supabase.from("documents").select(
+    `id, account_id, created_by, locked_to_owners, scope, project_id, kind, title,
+       path, status, metadata, updated_at,
+       document_versions!documents_current_version_fk ( content, version_number, author_id )`
+  ).eq("account_id", ctx.accountId).eq("kind", "memory").eq("memory_type", "working").eq("metadata->>session_id", sessionId).eq("locked_to_owners", false).limit(5);
+  if (projectId) query = query.or(`project_id.is.null,project_id.eq.${projectId}`);
+  else query = query.is("project_id", null);
+  const { data, error: error2 } = await query;
+  if (error2) {
+    console.warn(`[resolver] session working fetch failed: ${error2.message}`);
+    return [];
+  }
+  const out = [];
+  let used = 0;
+  for (const row of data ?? []) {
+    const metadata = row.metadata ?? {};
+    if (metadata.memory_type !== "working") continue;
+    if (metadata.session_id !== sessionId) continue;
+    if (!isDirectResolverDocumentEligible(
+      row,
+      { accountId: ctx.accountId, userId: ctx.userId, projectId },
+      {
+        projectAssociation: "account-or-active-project",
+        expectedKind: ["memory"]
+      }
+    )) {
+      continue;
+    }
+    const version4 = Array.isArray(row.document_versions) ? row.document_versions[0] : row.document_versions;
+    const body = version4?.content ?? "";
+    const cost = estimateTokens(body);
+    if (out.length > 0 && used + cost > SESSION_WORKING_MAX_TOKENS) break;
+    used += cost;
+    out.push({
+      id: row.id,
+      kind: "memory",
+      title: row.title,
+      body,
+      similarity: 1,
+      citation: {
+        path: row.path ?? null,
+        version_number: version4?.version_number ?? 1,
+        updated_at: row.updated_at ?? "",
+        author_id: version4?.author_id ?? null
+      },
+      component_id: null,
+      component_name: null,
+      memory_type: "working"
+    });
+  }
+  return out;
+}
 function buildDeliveredContextCounts(deliveredItems) {
   const laneCount = (...lanes) => {
     const accepted = new Set(lanes);
@@ -62465,6 +62591,7 @@ function buildDeliveredContextCounts(deliveredItems) {
     decisions: laneCount("decision"),
     required: laneCount("required"),
     pinned: laneCount("pinned"),
+    session_working: laneCount("session_working"),
     open_threads: laneCount("open_thread"),
     pack_context: laneCount("pack_context"),
     claim_guardrails: laneCount(
@@ -62489,6 +62616,7 @@ function dedupeResolveBundleDocumentLanes(bundle) {
   });
   bundle.required_core = keepFirst(bundle.required_core);
   bundle.pinned = keepFirst(bundle.pinned);
+  bundle.session_working = keepFirst(bundle.session_working);
   bundle.open_threads = keepFirst(bundle.open_threads);
   bundle.pack_context = keepFirst(bundle.pack_context);
   if (bundle.claim_guardrails) {
@@ -62561,6 +62689,12 @@ function buildDeliveredItemSnapshots(bundle) {
     () => "pinned",
     () => "directive",
     () => "force_included_pin"
+  );
+  add(
+    bundle.session_working,
+    () => "session_working",
+    () => "session_working",
+    () => "session_id_match"
   );
   add(
     bundle.open_threads,
@@ -62692,10 +62826,8 @@ var AssembleBundleArgs = external_exports.object({
   /** Explicit marginal-value cutoff fraction (0..1), overriding the account
    *  setting. For eval sweeps and diagnostics; 0 disables. */
   marginal_cutoff: external_exports.number().min(0).max(1).optional(),
-  /** Additionally pull OPEN episodic threads (predictions / follow-ups)
-   *  whose entities match — by entity + status, deliberately bypassing the
-   *  similarity threshold. Serial-content agents set this so "last week we
-   *  flagged NVDA" is grounded in the actual prior claim. */
+  /** Deprecated no-op. Open threads are always pulled (S1). Kept so older
+   *  clients that still send the flag don't fail schema validation. */
   include_open_threads: external_exports.boolean().optional(),
   /** Entities to match open threads against. When omitted, entities are
    *  inferred by word-boundary matching thread entities in the task text. */
@@ -62814,7 +62946,10 @@ var MEMORY_TYPE_WEIGHTS = {
   reference: 1,
   // Episodes are recalled by entity + time through the open-threads lane,
   // not by similarity ranking — neutral weight in the semantic lane.
-  episodic: 1
+  episodic: 1,
+  // Session working memory is force-included by session_id only — never
+  // compete in the semantic lane (weight 0 + explicit skip below).
+  working: 0
 };
 var ACTIVE_COMPONENT_BOOST = 0.15;
 var SAME_REPO_BOOST = 0.1;
@@ -63484,6 +63619,10 @@ async function maybeReactivateColdMatches(ctx, accountId, queryVec) {
 }
 async function assembleBundle(ctx, rawArgs, audit = {}) {
   const bundleStartedAt = Date.now();
+  let embeddingMs = 0;
+  let embeddingCacheHit = false;
+  let budgetRpcMs = null;
+  let budgetWaitMs = 0;
   const args = AssembleBundleArgs.parse(rawArgs);
   const kPerKind = args.k_per_kind ?? DEFAULT_K_PER_KIND;
   const projectId = args.project_id ?? ctx.projectId ?? null;
@@ -63532,8 +63671,10 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     );
   }
   let queryVec;
+  const embeddingStartedAt = Date.now();
   const cachedVec = getCachedEmbedding(args.task);
   if (cachedVec) {
+    embeddingCacheHit = true;
     queryVec = cachedVec;
   } else {
     try {
@@ -63545,33 +63686,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       );
     }
   }
+  embeddingMs = Date.now() - embeddingStartedAt;
   const reactivationDone = maybeReactivateColdMatches(ctx, ctx.accountId, queryVec);
-  let maxTokens;
-  let budgetTier;
-  let budgetSource;
-  let budgetFloorApplied = false;
-  if (args.max_tokens !== void 0) {
-    maxTokens = args.max_tokens;
-    budgetTier = "explicit";
-    budgetSource = "explicit";
-  } else {
-    const fromCorpus = await inferBudgetFromCorpus(ctx, queryVec);
-    if (fromCorpus) {
-      const heuristicTokens = inferBudget(args.task).tokens;
-      const floored = Math.max(fromCorpus.tokens, Math.round(heuristicTokens * 0.75));
-      maxTokens = Math.min(BUDGET_CEILING, floored);
-      budgetFloorApplied = maxTokens > fromCorpus.tokens;
-      budgetTier = tierForTokens(maxTokens);
-      budgetSource = "corpus";
-    } else {
-      const fromHeuristic = inferBudget(args.task);
-      maxTokens = fromHeuristic.tokens;
-      budgetTier = fromHeuristic.tier;
-      budgetSource = "heuristic";
-    }
-  }
+  const corpusBudgetPromise = args.max_tokens === void 0 ? (() => {
+    const startedAt = Date.now();
+    return inferBudgetFromCorpus(ctx, queryVec).catch((e2) => {
+      console.warn(`[resolver] inferBudgetFromCorpus rejected: ${e2 instanceof Error ? e2.message : String(e2)}`);
+      return null;
+    }).finally(() => {
+      budgetRpcMs = Date.now() - startedAt;
+    });
+  })() : null;
   const useHybrid = args.hybrid !== false;
   const RRF_TO_SIMILARITY_SCALE = 30;
+  const searchFanoutStartedAt = Date.now();
   const kindResults = await Promise.all(
     requestedKinds.map(async (kind2) => {
       const rpcName = useHybrid ? "search_documents_hybrid" : "search_documents";
@@ -63643,6 +63771,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       return { kind: kind2, rows: [...merged.values()] };
     })
   );
+  const searchFanoutMs = Date.now() - searchFanoutStartedAt;
   const nativeFunctions = args.native_functions === true && !!projectId && requestedKinds.includes("memory");
   const functionBodyById = /* @__PURE__ */ new Map();
   const functionComponentById = /* @__PURE__ */ new Map();
@@ -63718,7 +63847,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         // doc's decay clock to "fresh" — exactly what neutralized decay
         // fleet-wide. created_at is the doc's true age. citation.updated_at
         // above stays as the "last modified" provenance shown to users.
-        decayMultiplier: decayMultiplierForKind(kind2, r2.created_at)
+        decayMultiplier: decayMultiplierForKind(kind2, r2.created_at),
+        createdAt: r2.created_at
       });
     }
   }
@@ -63802,6 +63932,19 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         if (c2.kind === "memory" && typeof meta?.memory_type === "string") {
           c2.memory_type = normalizeMemoryType(meta.memory_type);
         }
+        if (c2.kind === "memory" && c2.memory_type === "working") {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "status_filtered",
+            detail: "session working memory is force-included by session_id, not semantic rank",
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
         const inherited = isProjectBrainInheritedDoc(projectId, c2, scopeRow);
         const inheritedDefault = meta?.default_for_projects === true || projectBrainPolicy.optionalChainIds.has(c2.id);
         const inheritedRequired = meta?.required_for_projects === true || projectBrainPolicy.requiredChainIds.has(c2.id);
@@ -63833,6 +63976,20 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
             similarity: c2.similarity,
             reason: "status_filtered",
             detail: `metadata.status is '${metaStatus}' (not active)`,
+            path: c2.citation.path
+          });
+          candidates.splice(i2, 1);
+          continue;
+        }
+        const supersededBy = typeof meta?.superseded_by === "string" ? meta.superseded_by.trim() : "";
+        if (!metaStatus && supersededBy && supersededBy !== c2.id) {
+          omittedCandidates.push({
+            id: c2.id,
+            kind: c2.kind,
+            title: c2.title,
+            similarity: c2.similarity,
+            reason: "superseded_by_stamp",
+            detail: `metadata.superseded_by points at ${supersededBy} (superseded without a status stamp)`,
             path: c2.citation.path
           });
           candidates.splice(i2, 1);
@@ -63998,7 +64155,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
               componentId: null,
               componentName: null,
               // created_at, not updated_at — see the search-candidate build.
-              decayMultiplier: decayMultiplierForKind(row.kind, row.created_at)
+              decayMultiplier: decayMultiplierForKind(row.kind, row.created_at),
+              createdAt: row.created_at
             });
           }
         }
@@ -64019,6 +64177,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
   let rerankAuditScores = null;
   let rerankLatencyMs = null;
   let rerankFallbackReason = null;
+  let rerankProvider = null;
   const { bodyMap, componentIdByDoc, rolesByDoc, componentScopedByDoc, canaryContentMap } = await hydrateCandidateBodies(
     ctx,
     candidates.map((c2) => c2.id),
@@ -64038,6 +64197,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
       let scores;
       let latencyMs;
       if (ctx.hostedRerank) {
+        rerankProvider = ctx.hostedRerank.provider;
         const startedAt = Date.now();
         scores = await Promise.race([
           rerankHosted(args.task, rerankInputs, ctx.hostedRerank),
@@ -64047,6 +64207,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
         ]);
         latencyMs = Date.now() - startedAt;
       } else {
+        rerankProvider = "llm";
         const result = await Promise.race([
           rerankCandidates(args.task, rerankInputs, ctx.rerank),
           new Promise(
@@ -64350,37 +64511,53 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
           return t2 <= AUTHORITY_TIER.USER_CORRECTION ? t2 : AUTHORITY_TIER.HISTORICAL;
         };
         const ranked = candidates.filter((c2) => neighbours.has(c2.id)).sort(byAuthorityThenScore(collapseTier, effectiveScore));
-        for (const keeper of ranked) {
-          if (claimed.has(keeper.id)) continue;
-          claimed.add(keeper.id);
-          const twins = [];
-          for (const nId of neighbours.get(keeper.id) ?? []) {
+        for (const leader of ranked) {
+          if (claimed.has(leader.id)) continue;
+          claimed.add(leader.id);
+          const members = [];
+          for (const nId of neighbours.get(leader.id) ?? []) {
             if (claimed.has(nId)) continue;
             const twin = byId.get(nId);
             if (!twin) continue;
             claimed.add(nId);
-            const sim = simByPair.get(`${keeper.id}:${nId}`) ?? dedupeThreshold;
+            members.push(twin);
+          }
+          if (members.length === 0) continue;
+          let keeper = leader;
+          if (leader.kind === "decision") {
+            const leaderTier = leader.authorityTier ?? AUTHORITY_TIER.HISTORICAL;
+            for (const m2 of members) {
+              if (m2.kind !== "decision") continue;
+              if ((m2.authorityTier ?? AUTHORITY_TIER.HISTORICAL) !== leaderTier) continue;
+              const mAt = Date.parse(m2.createdAt ?? "");
+              const kAt = Date.parse(keeper.createdAt ?? "");
+              if (Number.isFinite(mAt) && Number.isFinite(kAt) && mAt > kAt) keeper = m2;
+            }
+          }
+          const keptNewerDecision = keeper !== leader;
+          const droppedMembers = keptNewerDecision ? [leader, ...members.filter((m2) => m2.id !== keeper.id)] : members;
+          const twins = [];
+          for (const twin of droppedMembers) {
+            const sim = simByPair.get(`${keeper.id}:${twin.id}`) ?? dedupeThreshold;
             twins.push({
               id: twin.id,
               title: twin.title,
               similarity: sim,
-              est_tokens: estimateTokens(bodyMap.get(nId) ?? "")
+              est_tokens: estimateTokens(bodyMap.get(twin.id) ?? "")
             });
-            dropInfo.set(nId, { keeperTitle: keeper.title, similarity: sim });
+            dropInfo.set(twin.id, { keeperTitle: keeper.title, similarity: sim, keptNewerDecision });
           }
-          if (twins.length > 0) {
-            keeper.collapsedDuplicates = twins;
-            dedupeDroppedCount += twins.length;
-            dedupeTokensSaved += twins.reduce((s2, t2) => s2 + t2.est_tokens, 0);
-            dedupeClusters.push({
-              kept_id: keeper.id,
-              dropped: twins.map((t2) => ({
-                id: t2.id,
-                similarity: Number(t2.similarity.toFixed(4)),
-                est_tokens: t2.est_tokens
-              }))
-            });
-          }
+          keeper.collapsedDuplicates = twins;
+          dedupeDroppedCount += twins.length;
+          dedupeTokensSaved += twins.reduce((s2, t2) => s2 + t2.est_tokens, 0);
+          dedupeClusters.push({
+            kept_id: keeper.id,
+            dropped: twins.map((t2) => ({
+              id: t2.id,
+              similarity: Number(t2.similarity.toFixed(4)),
+              est_tokens: t2.est_tokens
+            }))
+          });
         }
         for (let i2 = candidates.length - 1; i2 >= 0; i2--) {
           const c2 = candidates[i2];
@@ -64393,7 +64570,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
             title: c2.title,
             similarity: c2.similarity,
             reason: "redundant_duplicate",
-            detail: `near-duplicate of "${drop.keeperTitle}" (cosine ${drop.similarity.toFixed(3)}) \u2014 kept the higher-scored copy`,
+            detail: `near-duplicate of "${drop.keeperTitle}" (cosine ${drop.similarity.toFixed(3)}) \u2014 ${drop.keptNewerDecision ? "kept the newer decision" : "kept the higher-scored copy"}`,
             path: c2.citation.path
           });
           candidates.splice(i2, 1);
@@ -64456,6 +64633,32 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     rest = kept;
   }
   budgetOrder.push(...rest);
+  let maxTokens;
+  let budgetTier;
+  let budgetSource;
+  let budgetFloorApplied = false;
+  if (args.max_tokens !== void 0) {
+    maxTokens = args.max_tokens;
+    budgetTier = "explicit";
+    budgetSource = "explicit";
+  } else {
+    const budgetWaitStartedAt = Date.now();
+    const fromCorpus = corpusBudgetPromise ? await corpusBudgetPromise : null;
+    budgetWaitMs = Date.now() - budgetWaitStartedAt;
+    if (fromCorpus) {
+      const heuristicTokens = inferBudget(args.task).tokens;
+      const floored = Math.max(fromCorpus.tokens, Math.round(heuristicTokens * 0.75));
+      maxTokens = Math.min(BUDGET_CEILING, floored);
+      budgetFloorApplied = maxTokens > fromCorpus.tokens;
+      budgetTier = tierForTokens(maxTokens);
+      budgetSource = "corpus";
+    } else {
+      const fromHeuristic = inferBudget(args.task);
+      maxTokens = fromHeuristic.tokens;
+      budgetTier = fromHeuristic.tier;
+      budgetSource = "heuristic";
+    }
+  }
   const included = [];
   const excluded = /* @__PURE__ */ new Set();
   const requiredCoreTokens = requiredCoreItems.reduce(
@@ -64843,6 +65046,7 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     recent_file_edits: recentFileEdits,
     work_in_flight: workInFlight,
     open_threads: [],
+    session_working: [],
     pack_context: [],
     recent_feedback: []
   };
@@ -64894,68 +65098,89 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     } catch {
     }
   }
-  if (args.include_open_threads) {
+  if (audit.sessionId) {
     try {
-      const { data: threadRows, error: threadErr } = await ctx.supabase.rpc("list_open_threads", {
-        p_account_id: ctx.accountId,
-        p_entities: args.entities && args.entities.length > 0 ? args.entities : null,
-        p_status: "open",
-        p_project_id: projectId ?? null,
-        p_limit: 50
-      });
-      if (!threadErr && Array.isArray(threadRows)) {
-        const taskLower = ` ${args.task.toLowerCase()} `;
-        const higherPriorityIds = /* @__PURE__ */ new Set([
-          ...bundle.required_core.map((item) => item.id),
-          ...bundle.pinned.map((item) => item.id)
-        ]);
-        const OPEN_THREADS_MAX = 5;
-        const OPEN_THREADS_MAX_TOKENS = 1e3;
-        let threadTokens = 0;
-        for (const raw of threadRows) {
-          if (bundle.open_threads.length >= OPEN_THREADS_MAX) break;
-          const id = raw.id;
-          if (higherPriorityIds.has(id)) continue;
-          const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
-          if (!args.entities || args.entities.length === 0) {
-            const hit = entities.some((e2) => {
-              const esc2 = e2.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-              return new RegExp(`(?:^|\\W)${esc2}(?:\\W|$)`).test(taskLower);
-            });
-            if (!hit) continue;
-          }
-          const body = typeof raw.content === "string" ? raw.content : "";
-          const tokens = estimateTokens(body);
-          if (threadTokens + tokens > OPEN_THREADS_MAX_TOKENS && bundle.open_threads.length > 0) {
-            break;
-          }
-          threadTokens += tokens;
-          higherPriorityIds.add(id);
-          bundle.open_threads.push({
-            id,
-            kind: "memory",
-            title: raw.title ?? "",
-            body,
-            similarity: 0,
-            citation: {
-              path: raw.path ?? null,
-              version_number: raw.version_number ?? 1,
-              updated_at: raw.updated_at ?? "",
-              author_id: null
-            },
-            component_id: null,
-            component_name: null,
-            thread: {
-              status: "open",
-              occurred_at: raw.occurred_at ?? null,
-              entities,
-              resolves: raw.resolves ?? null
-            }
-          });
-        }
+      const working = await assembleSessionWorking(ctx, audit.sessionId, projectId);
+      const higherPriorityIds = /* @__PURE__ */ new Set([
+        ...bundle.required_core.map((item) => item.id),
+        ...bundle.pinned.map((item) => item.id)
+      ]);
+      for (const item of working) {
+        if (higherPriorityIds.has(item.id)) continue;
+        bundle.session_working.push(item);
+        higherPriorityIds.add(item.id);
       }
-    } catch {
+      if (bundle.session_working.length > 0) {
+        const workingIds = new Set(bundle.session_working.map((i2) => i2.id));
+        bundle.memory = bundle.memory.filter((m2) => !workingIds.has(m2.id));
+      }
+    } catch (e2) {
+      console.warn(
+        `[resolver] session working assembly failed: ${e2 instanceof Error ? e2.message : String(e2)}`
+      );
     }
+  }
+  try {
+    const { data: threadRows, error: threadErr } = await ctx.supabase.rpc("list_open_threads", {
+      p_account_id: ctx.accountId,
+      p_entities: args.entities && args.entities.length > 0 ? args.entities : null,
+      p_status: "open",
+      p_project_id: projectId ?? null,
+      p_limit: 50
+    });
+    if (!threadErr && Array.isArray(threadRows)) {
+      const taskLower = ` ${args.task.toLowerCase()} `;
+      const higherPriorityIds = /* @__PURE__ */ new Set([
+        ...bundle.required_core.map((item) => item.id),
+        ...bundle.pinned.map((item) => item.id),
+        ...bundle.session_working.map((item) => item.id)
+      ]);
+      const OPEN_THREADS_MAX = 5;
+      const OPEN_THREADS_MAX_TOKENS = 1e3;
+      let threadTokens = 0;
+      for (const raw of threadRows) {
+        if (bundle.open_threads.length >= OPEN_THREADS_MAX) break;
+        const id = raw.id;
+        if (higherPriorityIds.has(id)) continue;
+        const entities = Array.isArray(raw.entities) ? raw.entities.filter((e2) => typeof e2 === "string") : [];
+        if (!args.entities || args.entities.length === 0) {
+          const hit = entities.some((e2) => {
+            const esc2 = e2.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            return new RegExp(`(?:^|\\W)${esc2}(?:\\W|$)`).test(taskLower);
+          });
+          if (!hit) continue;
+        }
+        const body = typeof raw.content === "string" ? raw.content : "";
+        const tokens = estimateTokens(body);
+        if (threadTokens + tokens > OPEN_THREADS_MAX_TOKENS && bundle.open_threads.length > 0) {
+          break;
+        }
+        threadTokens += tokens;
+        higherPriorityIds.add(id);
+        bundle.open_threads.push({
+          id,
+          kind: "memory",
+          title: raw.title ?? "",
+          body,
+          similarity: 0,
+          citation: {
+            path: raw.path ?? null,
+            version_number: raw.version_number ?? 1,
+            updated_at: raw.updated_at ?? "",
+            author_id: null
+          },
+          component_id: null,
+          component_name: null,
+          thread: {
+            status: "open",
+            occurred_at: raw.occurred_at ?? null,
+            entities,
+            resolves: raw.resolves ?? null
+          }
+        });
+      }
+    }
+  } catch {
   }
   dedupeResolveBundleDocumentLanes(bundle);
   const deliveredSemanticIds = /* @__PURE__ */ new Set([
@@ -65114,16 +65339,23 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     ...approvedColumnIds.has(i2.id) ? { approved: true } : {}
   }));
   const contextCounts = buildDeliveredContextCounts(deliveredItems);
+  const truncationReasons = /* @__PURE__ */ new Set();
+  if (requiredCoreTokens > maxTokens) truncationReasons.add("required_core_over_budget");
+  if (pinnedTokens > maxTokens) truncationReasons.add("pinned_content_over_budget");
+  if (omittedCandidates.some((candidate) => candidate.reason === "pinned_overflow")) truncationReasons.add("pinned_cap_excluded");
+  const budgetExcluded = omittedCandidates.filter((candidate) => candidate.reason === "budget_excluded");
+  if (budgetExcluded.some((candidate) => candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("path_document_budget_excluded");
+  if (budgetExcluded.some((candidate) => !candidate.detail.startsWith("path-matched doc:"))) truncationReasons.add("ranked_document_budget_excluded");
+  if (primary && estimateTokens(primary.body) > maxTokens) truncationReasons.add("primary_skill_over_budget");
+  if (used > maxTokens) truncationReasons.add("delivered_context_over_budget");
+  if (truncated && truncationReasons.size === 0) truncationReasons.add("other_budget_truncation");
   const empty_context_reason = contextCounts.total > 0 ? null : omittedCandidates.length > 0 ? "all_candidates_filtered" : "no_candidates_found";
   const auditMetadata = {
     task: args.task,
-    // Open-threads lane (include_open_threads) — which threads were pulled
-    // by entity, so audit replay shows the recall extension explicitly.
-    ...args.include_open_threads ? {
-      include_open_threads: true,
-      thread_entities: args.entities ?? null,
-      open_thread_ids: bundle.open_threads.map((t2) => t2.id)
-    } : {},
+    // Open-threads lane — always on; record which threads were pulled by entity.
+    include_open_threads: true,
+    thread_entities: args.entities ?? null,
+    open_thread_ids: bundle.open_threads.map((t2) => t2.id),
     // Subscribed-pack lane — which packs/items fed this bundle, for audit
     // replay attribution.
     ...bundle.pack_context.length > 0 ? {
@@ -65179,6 +65411,12 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     // rerank-only slice.
     latency_ms: {
       total: Date.now() - bundleStartedAt,
+      embedding: embeddingMs,
+      embedding_cache_hit: embeddingCacheHit,
+      search_fanout: searchFanoutMs,
+      budget_rpc: budgetRpcMs,
+      budget_wait: budgetWaitMs,
+      rerank: rerankLatencyMs,
       awareness_feeds: awarenessFeedsMs,
       path_recall: pathRecallMs
     },
@@ -65219,6 +65457,8 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     token_budget: maxTokens,
     token_used: used,
     truncated,
+    truncation_reasons: [...truncationReasons],
+    budget_excluded_count: budgetExcluded.length,
     active_component_id: activeComponentId,
     active_component_name: activeComponentName,
     active_repo: activeRepo,
@@ -65253,6 +65493,13 @@ async function assembleBundle(ctx, rawArgs, audit = {}) {
     rerank_used: rerankAuditScores !== null,
     rerank_scores: rerankAuditScores,
     rerank_latency_ms: rerankLatencyMs,
+    // Which reranker was attempted: a hosted provider name ('tei' = the
+    // self-hosted platform cross-encoder, 'cohere'/'jina'/'custom' =
+    // account-configured) or 'llm' for the chat-model (Haiku) path. null
+    // when rerank was never wired/attempted. Distinguishes hosted vs model
+    // rerank in dashboards, and stays set on failed attempts so
+    // rerank_fallback_reason spikes are attributable to their provider.
+    rerank_provider: rerankProvider,
     // Sticky skill-canary decisions. Identity values are never persisted;
     // only the identity source, deterministic bucket, clamped ratio, and exact
     // selected version are recorded for replay/experiment analysis.
@@ -65657,8 +65904,8 @@ async function resolveProposal(ctx, rawArgs) {
       }
     }).eq("id", args.proposal_id);
     if (error3) throw new Error(`resolve_proposal: reject failed: ${error3.message}`);
-    if (existing.proposal_action === "merge") {
-      const merge2 = existing.merge;
+    if (existing.proposal_action === "merge" || existing.proposal_action === "supersede") {
+      const merge2 = existing.merge ?? existing.supersede;
       if (merge2?.insight_id) {
         try {
           await ctx.supabase.from("derived_insights").update({ status: "dismissed", resolved_at: nowIso }).eq("id", merge2.insight_id).eq("account_id", ctx.accountId);
@@ -65677,6 +65924,9 @@ async function resolveProposal(ctx, rawArgs) {
   }
   if (existing.proposal_action === "update") {
     return applyUpdateProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
+  }
+  if (existing.proposal_action === "supersede") {
+    return applySupersedeProposal(ctx, args.proposal_id, doc, existing, actor, nowIso);
   }
   const { error: error2 } = await ctx.supabase.from("documents").update({
     metadata: {
@@ -65843,6 +66093,84 @@ async function applyMergeProposal(ctx, proposalId, doc, existing, actor, nowIso)
   }
   return {
     status: "merged",
+    kind: doc.kind,
+    title: doc.title
+  };
+}
+async function applySupersedeProposal(ctx, proposalId, doc, existing, actor, nowIso) {
+  const supersede = existing.supersede ?? {};
+  const draftKeepId = typeof supersede.keep_id === "string" ? supersede.keep_id : null;
+  const draftRetireId = typeof supersede.retire_id === "string" ? supersede.retire_id : null;
+  if (!draftKeepId || !draftRetireId) {
+    throw new Error("resolve_proposal: supersede proposal is malformed (missing keep/retire ids)");
+  }
+  const { data: memberRows, error: memberReadErr } = await ctx.supabase.from("documents").select("id, account_id, kind, status, created_at, metadata").eq("account_id", ctx.accountId).in("id", [draftKeepId, draftRetireId]);
+  if (memberReadErr) {
+    throw new Error(`resolve_proposal: supersede member read failed: ${memberReadErr.message}`);
+  }
+  const members = memberRows ?? [];
+  if (members.length !== 2) {
+    throw new Error(
+      "resolve_proposal: supersede pair went stale (member missing) \u2014 reject this proposal"
+    );
+  }
+  const metaOf = (m2) => m2.metadata ?? {};
+  const otherOf = (m2) => members.find((o2) => o2.id !== m2.id);
+  let retire = members.find((m2) => metaOf(m2).superseded_by === otherOf(m2).id) ?? null;
+  let keeper = retire ? otherOf(retire) : null;
+  if (!retire || !keeper) {
+    for (const m2 of members) {
+      const metaStatus = typeof metaOf(m2).status === "string" && metaOf(m2).status ? metaOf(m2).status : "active";
+      if (m2.kind !== "decision" || m2.status === "archived" || metaStatus !== "active") {
+        throw new Error(
+          "resolve_proposal: supersede pair went stale (member no longer an eligible decision) \u2014 reject this proposal"
+        );
+      }
+    }
+    const reviewer = existing.reviewer ?? {};
+    const reviewerCurrentId = reviewer.verdict === "contradiction" && typeof reviewer.current_id === "string" && members.some((m2) => m2.id === reviewer.current_id) ? reviewer.current_id : null;
+    const [a2, b2] = members;
+    const tierOf = (m2) => decisionAuthorityTier({ sqlStatus: m2.status, metadata: m2.metadata });
+    const cls = classifyDecisionPair(
+      { id: a2.id, created_at: a2.created_at, authorityTier: tierOf(a2) },
+      { id: b2.id, created_at: b2.created_at, authorityTier: tierOf(b2) }
+    );
+    const keepId = cls.basis === "authority" ? cls.currentId : reviewerCurrentId ?? draftKeepId;
+    keeper = members.find((m2) => m2.id === keepId);
+    retire = otherOf(keeper);
+    const { error: stampErr } = await ctx.supabase.from("documents").update({
+      status: "archived",
+      metadata: {
+        ...metaOf(retire),
+        status: "superseded",
+        superseded_by: keeper.id,
+        superseded_at: nowIso,
+        superseded_reason: "contradiction"
+      }
+    }).eq("id", retire.id).eq("account_id", ctx.accountId);
+    if (stampErr) {
+      throw new Error(`resolve_proposal: supersede stamp failed: ${stampErr.message}`);
+    }
+  }
+  const { error: flipErr } = await ctx.supabase.from("documents").update({
+    metadata: {
+      ...existing,
+      status: "applied",
+      superseded_doc_id: retire.id,
+      kept_doc_id: keeper.id,
+      accepted_at: nowIso,
+      accepted_by_user_sub: actor
+    }
+  }).eq("id", proposalId);
+  if (flipErr) throw new Error(`resolve_proposal: supersede flip failed: ${flipErr.message}`);
+  if (typeof supersede.insight_id === "string") {
+    try {
+      await ctx.supabase.from("derived_insights").update({ status: "accepted", resolved_at: nowIso }).eq("id", supersede.insight_id).eq("account_id", ctx.accountId);
+    } catch {
+    }
+  }
+  return {
+    status: "applied",
     kind: doc.kind,
     title: doc.title
   };
@@ -66614,6 +66942,7 @@ function renderBundleText(result, task) {
     }
     if (b2.required_core?.length) sections.push(["Required core", b2.required_core]);
     if (b2.pinned?.length) sections.push(["Pinned directives", b2.pinned]);
+    if (b2.session_working?.length) sections.push(["Session working memory", b2.session_working]);
     const skills = [b2.primary_skill, ...b2.supporting_skills ?? []].filter(
       (s2) => Boolean(s2)
     );
@@ -67136,31 +67465,97 @@ import path8 from "node:path";
 import { promises as fs4 } from "node:fs";
 import path5 from "node:path";
 import os5 from "node:os";
+import { randomUUID as randomUUID3 } from "node:crypto";
 
 // packages/plugin-core/dist/auth.js
 import { promises as fs2 } from "node:fs";
 import path2 from "node:path";
 import os2 from "node:os";
+import { randomUUID } from "node:crypto";
 var MEMLIN_PROD_AUTH0_DOMAIN = "memlin.us.auth0.com";
 var MEMLIN_PROD_AUTH0_CLIENT_ID = "fyYMQ4Cxc6Nu5juVwL8Ihqq4fgAFecG9";
 var AUTH0_DOMAIN = process.env.MEMLIN_AUTH0_DOMAIN || MEMLIN_PROD_AUTH0_DOMAIN;
 var AUTH0_CLIENT_ID = process.env.MEMLIN_AUTH0_CLIENT_ID || MEMLIN_PROD_AUTH0_CLIENT_ID;
 var AUTH0_AUDIENCE = process.env.MEMLIN_AUTH0_AUDIENCE ?? "https://api.memlin.ai";
-function tokenFilePath() {
+function persistedTokenFilePath() {
   return process.env.MEMLIN_TOKEN_FILE || path2.join(os2.homedir(), ".config", "memlin", "token.json");
+}
+var AUTH_FILE_LOCK_TIMEOUT_MS = 15e3;
+var AUTH_FILE_LOCK_STALE_MS = 2 * 6e4;
+var AUTH_FILE_LOCK_RETRY_MS = 50;
+function authFileLockPath() {
+  return `${persistedTokenFilePath()}.auth.lock`;
+}
+async function acquireAuthFileLock() {
+  const file = authFileLockPath();
+  const owner = `${process.pid}:${randomUUID()}`;
+  await fs2.mkdir(path2.dirname(file), { recursive: true });
+  const deadline = Date.now() + AUTH_FILE_LOCK_TIMEOUT_MS;
+  while (true) {
+    try {
+      const handle = await fs2.open(file, "wx", 384);
+      try {
+        await handle.writeFile(owner, "utf8");
+        await handle.sync();
+      } catch (error2) {
+        await handle.close().catch(() => {
+        });
+        await fs2.rm(file, { force: true }).catch(() => {
+        });
+        throw error2;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        await handle.close().catch(() => {
+        });
+        const currentOwner = await fs2.readFile(file, "utf8").catch(() => null);
+        if (currentOwner === owner) await fs2.rm(file, { force: true }).catch(() => {
+        });
+      };
+    } catch (error2) {
+      if (error2.code !== "EEXIST") throw error2;
+      try {
+        const stat = await fs2.stat(file);
+        if (Date.now() - stat.mtimeMs > AUTH_FILE_LOCK_STALE_MS) {
+          await fs2.rm(file, { force: true });
+          continue;
+        }
+      } catch (statError) {
+        if (statError.code === "ENOENT") continue;
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error("another Memlin sign-in or token refresh is still being saved");
+      }
+      await new Promise((resolve) => setTimeout(resolve, AUTH_FILE_LOCK_RETRY_MS));
+    }
+  }
+}
+async function withAuthFileLock(operation) {
+  const release = await acquireAuthFileLock();
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
 }
 async function readPersistedToken() {
   try {
-    const raw = await fs2.readFile(tokenFilePath(), "utf8");
+    const raw = await fs2.readFile(persistedTokenFilePath(), "utf8");
     return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 async function writePersistedToken(t2) {
-  const file = tokenFilePath();
+  const file = persistedTokenFilePath();
   await fs2.mkdir(path2.dirname(file), { recursive: true });
-  const tmp = path2.join(path2.dirname(file), `token.json.tmp-${process.pid}`);
+  const tmp = path2.join(
+    path2.dirname(file),
+    `${path2.basename(file)}.tmp-${process.pid}-${randomUUID()}`
+  );
   await fs2.writeFile(tmp, JSON.stringify(t2, null, 2), { mode: 384 });
   await fs2.chmod(tmp, 384).catch(() => {
   });
@@ -67210,17 +67605,27 @@ async function doRefresh(stale, marginMs) {
     }
   } catch {
   }
-  const refreshToken = latest?.refresh_token ?? stale.refresh_token;
+  const refreshSource = latest ?? stale;
+  const refreshToken = refreshSource.refresh_token;
   if (!refreshToken) {
     throw new Error("access token expired and no refresh token saved \u2014 run `memlin login`");
   }
   try {
     const fresh = await refreshAccessToken(refreshToken);
-    await writePersistedToken(fresh);
-    return fresh.access_token;
+    return await withAuthFileLock(async () => {
+      const beforeWrite = await readPersistedToken();
+      if (!beforeWrite || beforeWrite.access_token !== refreshSource.access_token) {
+        if (beforeWrite && Date.now() < beforeWrite.expires_at - marginMs) {
+          return beforeWrite.access_token;
+        }
+        throw new Error("saved Memlin credentials changed while the token was refreshing");
+      }
+      await writePersistedToken(fresh);
+      return fresh.access_token;
+    });
   } catch (err) {
     const after = await readPersistedToken();
-    if (after && after.access_token !== stale.access_token && Date.now() < after.expires_at - 6e4) {
+    if (after && after.access_token !== refreshSource.access_token && Date.now() < after.expires_at - 6e4) {
       return after.access_token;
     }
     throw new Error(
@@ -67242,6 +67647,11 @@ function requireClientId() {
     );
   }
 }
+function decodeJwtPayload(jwt) {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("not a JWT");
+  return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+}
 
 // packages/plugin-core/dist/memlin-api-client.js
 import { readFileSync } from "node:fs";
@@ -67254,6 +67664,8 @@ var AGENT_KIND_HEADER = "Memlin-Agent-Kind";
 var AGENT_DEVICE_HEADER = "Memlin-Agent-Device";
 var AGENT_VERSION_HEADER = "Memlin-Agent-Version";
 var AGENT_CAPABILITIES_HEADER = "Memlin-Agent-Capabilities";
+var AGENT_PLATFORM_HEADER = "Memlin-Agent-Platform";
+var AGENT_ARCHITECTURE_HEADER = "Memlin-Agent-Architecture";
 var AGENT_EXPECTED_CAPABILITIES = {
   "claude-code": ["cli", "commands", "hooks", "sync", "scribe", "resolve"],
   cursor: ["mcp", "commands", "hooks", "rules", "scribe", "resolve"],
@@ -67417,7 +67829,9 @@ var MemlinApiClient = class {
       [AGENT_KIND_HEADER]: resolveHost().kind,
       [AGENT_DEVICE_HEADER]: agentDevice(),
       [AGENT_VERSION_HEADER]: agentVersion(),
-      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(",")
+      [AGENT_CAPABILITIES_HEADER]: agentCapabilities().join(","),
+      [AGENT_PLATFORM_HEADER]: process.env.MEMLIN_AGENT_PLATFORM || os4.platform(),
+      [AGENT_ARCHITECTURE_HEADER]: process.env.MEMLIN_AGENT_ARCH || os4.arch()
     };
     if (includeAccount && this.cfg.accountId) {
       h2["Memlin-Account-Id"] = this.cfg.accountId;
@@ -67525,7 +67939,7 @@ var MemlinApiClient = class {
     return this.request("POST", "/usage/event", input, { accountId: opts.accountId });
   }
   /** GET /documents — list, filtered. */
-  async listDocuments(opts = {}) {
+  async listDocuments(opts = {}, callOpts = {}) {
     const qs = new URLSearchParams();
     if (opts.kinds) for (const k2 of opts.kinds) qs.append("kind", k2);
     if (opts.scopes) for (const s2 of opts.scopes) qs.append("scope", s2);
@@ -67534,15 +67948,17 @@ var MemlinApiClient = class {
       qs.set("project_id", opts.project_id === null ? "null" : opts.project_id);
     }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const res = await this.request("GET", `/documents${suffix}`);
+    const res = await this.request("GET", `/documents${suffix}`, void 0, { accountId: callOpts.accountId });
     return res.documents.map((d2) => {
       const { status, ...rest } = d2;
       return status == null ? rest : { ...rest, status };
     });
   }
   /** POST /documents — create or update a document. */
-  async writeDocument(input) {
-    return this.request("POST", "/documents", input);
+  async writeDocument(input, callOpts = {}) {
+    return this.request("POST", "/documents", input, {
+      accountId: callOpts.accountId
+    });
   }
   /** Atomically compare-and-sync the server-owned project CONTRACT.md. */
   async syncWorkspaceContract(input) {
@@ -67881,7 +68297,7 @@ function resolveApiUrl() {
 }
 
 // packages/plugin-core/dist/workspace-binding.js
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 import { constants, promises as fs3 } from "node:fs";
 import path4 from "node:path";
 var WORKSPACE_DIR_NAME = ".memlin";
@@ -68080,29 +68496,53 @@ function isFileNotFound(error2) {
 }
 
 // packages/plugin-core/dist/client.js
+function globalConfigFilePath() {
+  return process.env.MEMLIN_CONFIG_FILE || path5.join(os5.homedir(), ".config", "memlin", "config.json");
+}
 var CONFIG_DIR = path5.join(os5.homedir(), ".config", "memlin");
-var CONFIG_FILE = path5.join(CONFIG_DIR, "config.json");
 var TOKEN_FILE = path5.join(CONFIG_DIR, "token.json");
 async function readConfig() {
   try {
-    const raw = await fs4.readFile(CONFIG_FILE, "utf8");
+    const raw = await fs4.readFile(globalConfigFilePath(), "utf8");
     const parsed = JSON.parse(raw);
-    if (!parsed.account_id || !parsed.user_id) return null;
+    if (typeof parsed.account_id !== "string" || !parsed.account_id.trim() || typeof parsed.user_id !== "string" || !parsed.user_id.trim() || typeof parsed.auth0_sub !== "string" || !parsed.auth0_sub.trim()) {
+      return null;
+    }
     return {
-      api_url: parsed.api_url ?? DEFAULT_API_URL,
+      api_url: typeof parsed.api_url === "string" && parsed.api_url.trim() ? parsed.api_url : DEFAULT_API_URL,
       account_id: parsed.account_id,
       user_id: parsed.user_id,
-      project_id: parsed.project_id ?? null
+      auth0_sub: parsed.auth0_sub,
+      project_id: typeof parsed.project_id === "string" || parsed.project_id === null ? parsed.project_id : null
     };
   } catch {
     return null;
   }
 }
+function accessTokenSubject(accessToken) {
+  try {
+    const subject = decodeJwtPayload(accessToken).sub;
+    return typeof subject === "string" && subject.length > 0 ? subject : null;
+  } catch {
+    return null;
+  }
+}
+function configMatchesAccessToken(config2, accessToken) {
+  const subject = accessTokenSubject(accessToken);
+  return subject !== null && subject === config2.auth0_sub;
+}
+async function getIdentityBoundAccessToken(config2) {
+  const accessToken = await getValidAccessToken();
+  if (!configMatchesAccessToken(config2, accessToken)) {
+    throw new Error("not signed in \u2014 saved Memlin account does not match the saved token");
+  }
+  return accessToken;
+}
 async function getApi(opts = {}) {
   const config2 = await readConfig();
   if (!config2) return null;
   try {
-    await getValidAccessToken();
+    await getIdentityBoundAccessToken(config2);
   } catch {
     return null;
   }
@@ -68112,7 +68552,7 @@ async function getApi(opts = {}) {
   const apiUrl = process.env.MEMLIN_API_URL?.trim() || config2.api_url || resolveApiUrl();
   const api = new MemlinApiClient({
     baseUrl: apiUrl,
-    getAccessToken: getValidAccessToken,
+    getAccessToken: () => getIdentityBoundAccessToken(config2),
     accountId: config2.account_id
   });
   return { api, config: config2, workspaceBound, workspaceRoot };
@@ -68668,15 +69108,6 @@ function filterAbsentOnDisk(paths, rootOverride) {
 // apps/mcp-server/src/index.ts
 var MEMLIN_PROD_SUPABASE_URL = "https://nsvqnmvummyxbzupxytl.supabase.co";
 var MEMLIN_PROD_SUPABASE_ANON_KEY = "sb_publishable_EDSbENKAPxGmvigUHqiKOg_l06zoSXG";
-var CONFIG_FILE2 = path11.join(os8.homedir(), ".config", "memlin", "config.json");
-async function readPersistedConfig() {
-  try {
-    const raw = await fs7.readFile(CONFIG_FILE2, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
 function normalizeGitRemote3(raw) {
   if (!raw) return null;
   let s2 = raw.trim();
@@ -68736,11 +69167,25 @@ function readGitRemote2(cwd) {
     return null;
   }
 }
-async function currentAccessToken() {
-  return process.env.MEMLIN_ACCESS_TOKEN || await getValidAccessToken();
+async function currentAccessToken(expectedConfig) {
+  const override = process.env.MEMLIN_ACCESS_TOKEN?.trim();
+  if (override) return override;
+  const config2 = expectedConfig === void 0 ? await readConfig() : expectedConfig;
+  if (!config2) throw new Error("not signed in \u2014 run `memlin login`");
+  return getIdentityBoundAccessToken(config2);
+}
+function authConfigRevision(config2) {
+  if (!config2) return null;
+  return JSON.stringify([
+    config2.api_url,
+    config2.account_id,
+    config2.user_id,
+    config2.auth0_sub,
+    config2.project_id ?? null
+  ]);
 }
 async function resolveConfig() {
-  const config2 = await readPersistedConfig();
+  const config2 = await readConfig();
   const cwd = runtimeCwd();
   const gitRemote = readGitRemote2(cwd);
   const apiUrl = process.env.MEMLIN_API_URL || config2?.api_url || "https://memlin.ai/api/v1";
@@ -68752,7 +69197,7 @@ async function resolveConfig() {
   let accountId = process.env.MEMLIN_ACCOUNT_ID || pinnedAccountId || config2?.account_id || "";
   const userId = process.env.MEMLIN_USER_ID || config2?.user_id || "";
   let projectId = process.env.MEMLIN_PROJECT_ID || (pinnedProjectId !== void 0 ? pinnedProjectId : config2?.project_id ?? null);
-  const accessToken = await currentAccessToken();
+  const accessToken = await currentAccessToken(config2);
   if (!supabaseUrl || !supabaseAnon || !accessToken || !accountId || !userId) {
     const missing = [
       !supabaseUrl && "SUPABASE_URL",
@@ -68785,7 +69230,9 @@ async function resolveConfig() {
     projectId,
     apiUrl,
     cwd,
-    gitRemote
+    gitRemote,
+    authConfig: config2,
+    authConfigRevision: authConfigRevision(config2)
   };
 }
 function agentKind() {
@@ -68821,16 +69268,16 @@ async function resolveProject2(input) {
     return null;
   }
 }
-async function resolveViaApi(args) {
-  const accessToken = await currentAccessToken();
-  const res = await fetch(`${cfg.apiUrl.replace(/\/+$/, "")}/resolve`, {
+async function resolveViaApi(args, requestCfg) {
+  const accessToken = await currentAccessToken(requestCfg.authConfig);
+  const res = await fetch(`${requestCfg.apiUrl.replace(/\/+$/, "")}/resolve`, {
     method: "POST",
-    headers: agentHeaders(accessToken, cfg.accountId),
+    headers: agentHeaders(accessToken, requestCfg.accountId),
     body: JSON.stringify({
       ...args,
-      project_id: args.project_id ?? cfg.projectId ?? null,
-      cwd: args.cwd ?? cfg.cwd,
-      git_remote: args.git_remote ?? cfg.gitRemote,
+      project_id: args.project_id ?? requestCfg.projectId ?? null,
+      cwd: args.cwd ?? requestCfg.cwd,
+      git_remote: args.git_remote ?? requestCfg.gitRemote,
       ...process.env.MEMLIN_SESSION_ID ? { session_id: process.env.MEMLIN_SESSION_ID } : {}
     })
   });
@@ -68838,28 +69285,28 @@ async function resolveViaApi(args) {
   if (!res.ok) throw new Error(`resolve HTTP ${res.status}: ${body}`);
   return JSON.parse(body);
 }
-function createToolContext(accessToken) {
-  const supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnon, {
+function createToolContext(accessToken, requestCfg) {
+  const supabase = createClient(requestCfg.supabaseUrl, requestCfg.supabaseAnon, {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { headers: { Authorization: `Bearer ${accessToken}` } }
   });
   return {
     supabase,
-    accountId: cfg.accountId,
-    projectId: cfg.projectId,
-    userId: cfg.userId,
+    accountId: requestCfg.accountId,
+    projectId: requestCfg.projectId,
+    userId: requestCfg.userId,
     // Light up semantic search when OPENAI_API_KEY is in env. sync-core's embed
     // throws if the key is missing, so we only wire the function in when it's
     // actually set — otherwise handlers fall back to ILIKE.
     embed: process.env.OPENAI_API_KEY ? embed : void 0,
     agentKind: agentKind(),
     sessionId: process.env.MEMLIN_SESSION_ID || null,
-    defaultCwd: cfg.cwd,
-    defaultGitRemote: cfg.gitRemote,
+    defaultCwd: requestCfg.cwd,
+    defaultGitRemote: requestCfg.gitRemote,
     // For tools that call back into the REST API (memlin_capture_session →
     // /api/v1/scribe/session) rather than going straight to Supabase.
     accessToken,
-    apiBaseUrl: cfg.apiUrl
+    apiBaseUrl: requestCfg.apiUrl
   };
 }
 var STATUS_TOOL = {
@@ -68875,32 +69322,46 @@ function fmtDuration(absMs) {
   if (abs < 864e5) return `${Math.round(abs / 36e5)}h`;
   return `${Math.round(abs / 864e5)}d`;
 }
-async function buildStatus() {
+async function buildStatus(requestCfg) {
   const now = Date.now();
   const lines = ["memlin status", "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"];
   const token = await readPersistedToken().catch(() => null);
+  const persistedConfig = await readConfig().catch(() => null);
+  const environmentToken = process.env.MEMLIN_ACCESS_TOKEN?.trim() || null;
+  const identityBound = Boolean(
+    environmentToken || token && persistedConfig && configMatchesAccessToken(persistedConfig, token.access_token)
+  );
   let auth;
   lines.push("", "Auth");
-  if (!token) {
+  if (!environmentToken && !token) {
     auth = {
       signed_in: false,
       detail: 'not signed in \u2014 run "Memlin: Sign In" (Command Palette) or /memlin-login'
     };
     lines.push('  not signed in \u2014 run "Memlin: Sign In" (Command Palette) or /memlin-login');
+  } else if (!identityBound) {
+    auth = {
+      signed_in: false,
+      detail: "saved account and token do not match \u2014 sign in again"
+    };
+    lines.push("  saved account and token do not match \u2014 sign in again");
   } else {
-    const hasExpiry = Number.isFinite(token.expires_at) && token.expires_at > 0;
-    const remaining = hasExpiry ? token.expires_at - now : null;
+    const expiresAt = token?.expires_at;
+    const hasExpiry = typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > 0;
+    const remaining = hasExpiry ? expiresAt - now : null;
     const expired = remaining != null ? remaining <= 0 : false;
     auth = {
       signed_in: true,
-      access_token: "present",
-      expires_at: hasExpiry ? new Date(token.expires_at).toISOString() : null,
+      access_token: environmentToken ? "environment" : "present",
+      expires_at: hasExpiry ? new Date(expiresAt).toISOString() : null,
       expires_in_ms: remaining,
       expired,
-      refresh_token: token.refresh_token ? "present" : "absent",
-      refresh_state: token.refresh_token ? "auto-rotates on next call" : "re-run sign in when the access token expires"
+      refresh_token: token?.refresh_token ? "present" : "absent",
+      refresh_state: token?.refresh_token ? "auto-rotates on next call" : environmentToken ? "managed by the host environment" : "re-run sign in when the access token expires"
     };
-    if (!hasExpiry) {
+    if (environmentToken && !token) {
+      lines.push("  access token: provided by the host environment");
+    } else if (!hasExpiry) {
       lines.push("  access token: present (no expiry recorded \u2014 legacy token)");
     } else if (expired) {
       lines.push(
@@ -68909,23 +69370,23 @@ async function buildStatus() {
     } else {
       lines.push(
         `  access token: valid for ${fmtDuration(remaining)} (until ${new Date(
-          token.expires_at
+          expiresAt
         ).toLocaleString()})`
       );
     }
     lines.push(
-      `  refresh token: ${token.refresh_token ? "present (auto-rotates)" : "absent (re-run sign in when token expires)"}`
+      `  refresh token: ${environmentToken && !token ? "managed by the host environment" : token?.refresh_token ? "present (auto-rotates)" : "absent (re-run sign in when token expires)"}`
     );
   }
-  lines.push("", "Account", `  account_id:  ${cfg.accountId || "(none)"}`);
+  lines.push("", "Account", `  account_id:  ${requestCfg.accountId || "(none)"}`);
   lines.push("", "Project");
-  lines.push(`  cwd:         ${cfg.cwd}`);
-  if (cfg.projectId) lines.push(`  project:     ${cfg.projectId}`);
+  lines.push(`  cwd:         ${requestCfg.cwd}`);
+  if (requestCfg.projectId) lines.push(`  project:     ${requestCfg.projectId}`);
   else lines.push("  project:     (none) \u2014 running against account-scope only");
-  if (cfg.gitRemote) lines.push(`  git remote:  ${cfg.gitRemote}`);
+  if (requestCfg.gitRemote) lines.push(`  git remote:  ${requestCfg.gitRemote}`);
   lines.push("", "Routing");
   lines.push(`  host:        ${agentKind()}`);
-  lines.push(`  api:         ${cfg.apiUrl}`);
+  lines.push(`  api:         ${requestCfg.apiUrl}`);
   lines.push("  mcp:         local stdio (node ./dist/mcp-server.js)");
   let sync = null;
   let localChanges = null;
@@ -68976,15 +69437,15 @@ async function buildStatus() {
   }
   return {
     auth,
-    account: { account_id: cfg.accountId || null },
+    account: { account_id: requestCfg.accountId || null },
     project: {
-      project_id: cfg.projectId ?? null,
-      cwd: cfg.cwd,
-      git_remote: cfg.gitRemote
+      project_id: requestCfg.projectId ?? null,
+      cwd: requestCfg.cwd,
+      git_remote: requestCfg.gitRemote
     },
     routing: {
       host: agentKind(),
-      api_url: cfg.apiUrl,
+      api_url: requestCfg.apiUrl,
       mcp_transport: "local stdio (node ./dist/mcp-server.js)"
     },
     sync,
@@ -69000,12 +69461,36 @@ var cfg = await resolveConfig().catch((err) => {
 var cfgResolvedAt = Date.now();
 var CFG_TTL_MS = 3e4;
 async function refreshCfg() {
-  if (Date.now() - cfgResolvedAt < CFG_TTL_MS) return;
+  const cachedCfg = cfg;
+  const liveConfig = await readConfig().catch(() => null);
+  const liveRevision = authConfigRevision(liveConfig);
+  const identityChanged = liveRevision !== cachedCfg.authConfigRevision;
+  if (!identityChanged && Date.now() - cfgResolvedAt < CFG_TTL_MS) return cachedCfg;
   try {
-    cfg = await resolveConfig();
+    const nextCfg = await resolveConfig();
+    const finalConfig = await readConfig().catch(() => null);
+    const finalRevision = authConfigRevision(finalConfig);
+    if (finalRevision !== nextCfg.authConfigRevision) {
+      throw new Error("Memlin account changed while request configuration was resolving.");
+    }
+    if (cfg.authConfigRevision !== cachedCfg.authConfigRevision && cfg.authConfigRevision !== nextCfg.authConfigRevision) {
+      if (cfg.authConfigRevision === finalRevision) return cfg;
+      throw new Error("A newer Memlin account configuration is already active.");
+    }
+    cfg = nextCfg;
     cfgResolvedAt = Date.now();
-  } catch {
+    return nextCfg;
+  } catch (error2) {
+    const currentConfig = await readConfig().catch(() => null);
+    const currentRevision = authConfigRevision(currentConfig);
+    if (identityChanged || currentRevision !== cachedCfg.authConfigRevision) {
+      if (cfg.authConfigRevision === currentRevision) return cfg;
+      throw new Error("Memlin account credentials changed; retry after sign-in finishes.", {
+        cause: error2
+      });
+    }
     cfgResolvedAt = Date.now() - CFG_TTL_MS + 5e3;
+    return cachedCfg;
   }
 }
 var server = new Server(
@@ -69019,36 +69504,48 @@ server.setRequestHandler(ListPromptsRequestSchema, async () => ({
   prompts: listPrompts()
 }));
 server.setRequestHandler(GetPromptRequestSchema, async (req) => {
-  await refreshCfg();
+  const requestCfg = await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
-  const token = await currentAccessToken();
-  const resolveFn = async ({ task, project_id }) => await resolveViaApi({
-    task,
-    ...project_id ? { project_id } : {}
-  });
-  const result = await getPrompt(createToolContext(token), name, args, resolveFn);
+  const token = await currentAccessToken(requestCfg.authConfig);
+  const resolveFn = async ({ task, project_id }) => await resolveViaApi(
+    {
+      task,
+      ...project_id ? { project_id } : {}
+    },
+    requestCfg
+  );
+  const result = await getPrompt(createToolContext(token, requestCfg), name, args, resolveFn);
   return result;
 });
-server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-  resources: await listResources(createToolContext(await currentAccessToken()))
-}));
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  const requestCfg = await refreshCfg();
+  return {
+    resources: await listResources(
+      createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg)
+    )
+  };
+});
 server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
   resourceTemplates: resourceTemplates()
 }));
 server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
-  const result = await readResource(createToolContext(await currentAccessToken()), req.params.uri);
+  const requestCfg = await refreshCfg();
+  const result = await readResource(
+    createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg),
+    req.params.uri
+  );
   return result;
 });
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  await refreshCfg();
+  const requestCfg = await refreshCfg();
   const name = req.params.name;
   const args = req.params.arguments ?? {};
   try {
     const verdict = await runPreToolUseHandler({
       tool_name: name,
       tool_input: args,
-      cwd: cfg.cwd,
+      cwd: requestCfg.cwd,
       ...process.env.MEMLIN_SESSION_ID ? { session_id: process.env.MEMLIN_SESSION_ID } : {}
     });
     if (verdict.decision === "block") {
@@ -69066,7 +69563,11 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   } catch {
   }
   try {
-    const result = name === "memlin_status" ? await buildStatus() : name === "memlin_resolve_task" ? await resolveViaApi(args) : await callTool(createToolContext(await currentAccessToken()), name, args);
+    const result = name === "memlin_status" ? await buildStatus(requestCfg) : name === "memlin_resolve_task" ? await resolveViaApi(args, requestCfg) : await callTool(
+      createToolContext(await currentAccessToken(requestCfg.authConfig), requestCfg),
+      name,
+      args
+    );
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   } catch (err) {
     return {

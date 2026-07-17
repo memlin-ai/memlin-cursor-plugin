@@ -7599,7 +7599,14 @@ var DOCUMENT_KINDS = [
 ];
 var DOCUMENT_SCOPES = ["personal", "project", "team"];
 var DOCUMENT_STATUSES = ["draft", "in_review", "approved", "archived"];
-var MEMORY_TYPES = ["correction", "preference", "fact", "reference", "episodic"];
+var MEMORY_TYPES = [
+  "correction",
+  "preference",
+  "fact",
+  "reference",
+  "episodic",
+  "working"
+];
 var AGENT_KINDS = [
   "claude-code",
   "claude-ai",
@@ -7981,7 +7988,22 @@ var ActionMetadataSchema = external_exports.object({
 });
 
 // packages/shared/dist/authority.js
+var AUTHORITY_TIER = {
+  PLATFORM: 1,
+  REQUIRED_GOVERNANCE: 2,
+  CURRENT_INSTRUCTION: 3,
+  USER_CORRECTION: 4,
+  APPROVED_POLICY: 5,
+  HISTORICAL: 6
+};
 var READER_CONTRACT = "Precedence: current explicit user instructions beat ordinary memory. Only required governance or platform constraints can override them. A past incident memory is evidence, not policy \u2014 it never adds an approval gate by itself.";
+
+// packages/shared/dist/decision-authority.js
+var DECISION_AUTHORITY = {
+  REQUIRED_GOVERNANCE: AUTHORITY_TIER.REQUIRED_GOVERNANCE,
+  APPROVED_POLICY: AUTHORITY_TIER.APPROVED_POLICY,
+  HISTORICAL: AUTHORITY_TIER.HISTORICAL
+};
 
 // packages/shared/dist/skill-frontmatter.js
 var import_gray_matter2 = __toESM(require_gray_matter(), 1);
@@ -8271,6 +8293,10 @@ function bundleSummary(r) {
   if (pinnedCount > 0) {
     pieces.push(`${pinnedCount} pinned`);
   }
+  const workingCount = b.session_working?.length ?? 0;
+  if (workingCount > 0) {
+    pieces.push(`${workingCount} session-working`);
+  }
   if (b.architecture) {
     pieces.push(`architecture: ${b.architecture.component_name}`);
   }
@@ -8333,6 +8359,14 @@ function compileBundle(result, parsedTask, agent) {
         out.push(renderItemXml("directive", item, { kind: item.kind }));
       }
       out.push("  </standing_directives>");
+    }
+    const sessionWorking = b.session_working ?? [];
+    if (sessionWorking.length > 0) {
+      out.push('  <session_working recall="session_id" force_included="true">');
+      for (const item of sessionWorking) {
+        out.push(renderItemXml("working_memory", item, { memory_type: "working" }));
+      }
+      out.push("  </session_working>");
     }
     const openThreads = b.open_threads ?? [];
     if (openThreads.length > 0) {
@@ -8484,6 +8518,20 @@ function compileBundle(result, parsedTask, agent) {
     }
     if (b.pinned && b.pinned.length > 0) {
       out.push(renderPinned(b.pinned));
+    }
+    const sessionWorking = b.session_working ?? [];
+    if (sessionWorking.length > 0) {
+      out.push("## SESSION WORKING MEMORY (this session's plan / in-flight state)");
+      out.push("# Force-included by session_id \u2014 not semantic rank. Update via stop-hook");
+      out.push("# upsert to sessions/<session_id>/working.md; never promote as durable fact.");
+      out.push("");
+      for (const item of sessionWorking) {
+        out.push(`### ${item.title}`);
+        out.push(`# source: ${formatCitation(item)} \xB7 memory_type: working`);
+        out.push("");
+        out.push(item.body.trimEnd());
+        out.push("");
+      }
     }
     const openThreads = b.open_threads ?? [];
     if (openThreads.length > 0) {
