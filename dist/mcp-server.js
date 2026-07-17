@@ -67880,7 +67880,7 @@ function agentDevice() {
 var cachedAgentVersion = null;
 function agentVersion() {
   if (cachedAgentVersion) return cachedAgentVersion;
-  cachedAgentVersion = "0.3.4";
+  cachedAgentVersion = "0.3.5";
   return cachedAgentVersion;
 }
 function agentCapabilities() {
@@ -69394,7 +69394,7 @@ function agentHeaders(accessToken, accountId) {
     "Memlin-Account-Id": accountId,
     "Memlin-Agent-Kind": agentKind(),
     "Memlin-Agent-Device": agentDevice2(),
-    "Memlin-Agent-Version": "0.3.4",
+    "Memlin-Agent-Version": "0.3.5",
     "Memlin-Agent-Capabilities": agentCapabilities2(),
     "Content-Type": "application/json"
   };
@@ -69678,7 +69678,7 @@ async function refreshCfg() {
   }
 }
 var server = new Server(
-  { name: "memlin", version: "0.3.4" },
+  { name: "memlin", version: "0.3.5" },
   { capabilities: { tools: {}, prompts: {}, resources: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

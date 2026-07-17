@@ -29,21 +29,21 @@ Claude Code plugin (`apps/cli-plugin`). It shares the host-agnostic engine in
 
 ## Install
 
-**One command (macOS/Linux):**
+Install Memlin Companion, sign in, then open **Companion → Integrations →
+Cursor** and choose **Install**. Turn on **Install updates automatically** for
+Cursor if you want Companion to apply verified releases from the signed
+catalog. Restart Cursor or run **Developer: Reload Window** after an install or
+update.
+
+**Signed repair fallback (macOS/Linux):**
 
 ```bash
 curl -fsSL https://memlin.ai/install-cursor.sh | bash
 ```
 
-Verifies the signed native bundle, installs it at
+The fallback verifies the signed native bundle, installs it at
 `~/.cursor/plugins/local/memlin`, provisions the `memlin` command, and signs
-you in. Restart Cursor or run **Developer: Reload Window**, then run
-`memlin add-project` in your repo.
-
-Public and team installs use **Cursor → Customize → Plugins**. Cursor owns
-those marketplace updates, but a marketplace install cannot create a launcher
-in `~/.local/bin`; MCP-backed commands work directly, while CLI-only setup and
-sync commands require the signed bootstrap above.
+you in. Companion can manage that local install the next time it opens.
 
 **Full guide (Windows + disable/uninstall):** https://memlin.ai/docs/plugin-install-guide
 

@@ -1,6 +1,6 @@
 {
   "name": "@memlin/cursor-plugin-bundle",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "type": "module",
   "private": true
 }

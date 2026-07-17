@@ -1,15 +1,18 @@
 Sign in is an interactive browser device flow and cannot be completed by the
-agent. Native Cursor Marketplace installs do not create a `memlin` executable
-or a Command Palette sign-in command. On macOS/Linux, tell the user to run the
-signed bootstrap:
+agent. Use Memlin Companion for the normal install and sign-in flow:
+
+1. Open **Companion → Integrations → Cursor**.
+2. Choose **Install**.
+3. Turn on **Install updates automatically** if desired.
+
+On macOS/Linux, the signed repair fallback is:
 
 `curl -fsSL https://memlin.ai/install-cursor.sh | bash`
 
-If Memlin is already installed from Marketplace, uninstall that copy under
-Cursor Customize before switching channels; the bootstrap refuses duplicate
-local + Marketplace ownership. It then verifies and installs the same native
-plugin, provisions `memlin`, and starts sign-in. On Windows, use Memlin
-Companion's sign-in; if Companion has installed the local plugin, the direct fallback is
+If Companion detects a legacy Cursor copy, remove it under Cursor Customize
+before installing with Companion; the installer refuses duplicate plugin
+ownership. On Windows, use Memlin Companion's sign-in. If Companion has
+installed the local plugin, the direct fallback is
 `node "$HOME\.cursor\plugins\local\memlin\dist\cli\main.js" login`. If
 `memlin` is already available, run `memlin login` instead. Rotating tokens are
 stored at `~/.config/memlin/token.json`; re-run login to switch users.
